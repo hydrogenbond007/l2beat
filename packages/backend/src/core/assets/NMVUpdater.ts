@@ -98,7 +98,10 @@ export class NMVUpdater implements AssetUpdater {
     reports.push(...genOpTokenReport(prices, timestamp))
     reports.push(...genArbTokenReport(prices, timestamp))
 
-    await this.reportRepository.addOrUpdateMany(reports)
+    //! REFPOINT
+    await this.reportRepository.addOrUpdateMany(
+      reports.filter((r) => r.amount > 0),
+    )
 
     // TODO(radomski): chainId should correctly represent OP/ARB
     await this.reportStatusRepository.add({

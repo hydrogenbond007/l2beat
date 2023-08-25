@@ -126,7 +126,11 @@ export class ArbitrumEBVUpdater implements AssetUpdater {
       this.getProjectId(),
       this.getChainId(),
     )
-    await this.reportRepository.addOrUpdateMany(reports)
+
+    //! REFPOINT
+    await this.reportRepository.addOrUpdateMany(
+      reports.filter((r) => r.amount > 0),
+    )
 
     await this.reportStatusRepository.add({
       configHash: this.getConfigHash(),

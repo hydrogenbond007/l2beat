@@ -34,6 +34,7 @@ import {
 import { ReportStatusRepository } from '../../../peripherals/database/ReportStatusRepository'
 import { getProjectAssetChartData } from './charts'
 import { DetailedTvlController } from './DetailedTvlController'
+import { fillAllMissingAssetReports } from './timerange'
 
 describe(DetailedTvlController.name, () => {
   const START = UnixTime.fromDate(new Date('2022-05-31'))
@@ -572,11 +573,25 @@ function fakeReportSeries(
     fakeAssetReport(projectId, chainId, asset, type, timestamp),
   )
 
+  const token = { id: asset, type, chainId } as Token
+
+  const { filledHourlyReports, filledSixHourlyReports, filledDailyReports } =
+    fillAllMissingAssetReports(
+      token,
+      projectId,
+      {
+        hourly: hourlyReports,
+        sixHourly: sixHourlyReports,
+        daily: dailyReports,
+      },
+      to,
+    )
+
   return {
     from,
     to,
-    hourlyReports,
-    sixHourlyReports,
-    dailyReports,
+    hourlyReports: filledHourlyReports,
+    sixHourlyReports: filledSixHourlyReports,
+    dailyReports: filledDailyReports,
   }
 }

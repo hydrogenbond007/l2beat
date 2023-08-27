@@ -233,7 +233,6 @@ describe(DetailedTvlController.name, () => {
           data: getProjectAssetChartData(
             fakeReports.dailyReports,
             USDC.decimals,
-            24,
           ),
         })
 
@@ -242,7 +241,6 @@ describe(DetailedTvlController.name, () => {
           data: getProjectAssetChartData(
             fakeReports.sixHourlyReports,
             USDC.decimals,
-            6,
           ),
         })
 
@@ -251,7 +249,6 @@ describe(DetailedTvlController.name, () => {
           data: getProjectAssetChartData(
             fakeReports.hourlyReports,
             USDC.decimals,
-            1,
           ),
         })
 

@@ -1,11 +1,11 @@
 import { tokenList } from '@l2beat/config'
 import { Logger } from '@l2beat/shared'
 import {
+  assert,
   AssetId,
   ChainId,
   EthereumAddress,
   ProjectId,
-  TvlApiChart,
   UnixTime,
 } from '@l2beat/shared-pure'
 import { expect, mockObject } from 'earl'
@@ -84,249 +84,255 @@ describe(TvlController.name, () => {
         [USDC],
         Logger.SILENT,
       )
-      const types: TvlApiChart['types'] = ['timestamp', 'usd', 'eth']
       const charts = await controller.getTvlApiResponse()
-      expect(charts?.projects.arbitrum).toEqual({
-        charts: {
-          hourly: {
-            types,
-            data: [],
-          },
-          sixHourly: {
-            types,
-            data: [],
-          },
-          daily: {
-            types,
-            data: [],
-          },
+
+      assert(charts)
+      expect(charts.projects.arbitrum?.tokens).toEqual([
+        {
+          assetId: AssetId('usdc-usd-coin'),
+          tvl: 2469.12,
         },
-        tokens: [
-          {
-            assetId: AssetId('usdc-usd-coin'),
-            tvl: 2469.12,
-          },
-        ],
+      ])
+
+      // Empty response check
+      expect(charts.bridges.hourly.data.length).toEqual(168)
+      expect(charts.bridges.sixHourly.data.length).toEqual(360)
+      expect(charts.bridges.daily.data.length).toEqual(929)
+
+      expect(charts.combined.hourly.data.length).toEqual(168)
+      expect(charts.combined.sixHourly.data.length).toEqual(360)
+      expect(charts.combined.daily.data.length).toEqual(929)
+
+      expect(charts.layers2s.hourly.data.length).toEqual(168)
+      expect(charts.layers2s.sixHourly.data.length).toEqual(360)
+      expect(charts.layers2s.daily.data.length).toEqual(929)
+    })
+
+    describe(TvlController.prototype.getProjectAssetChart.name, () => {
+      it('returns undefined if project does not exist', async () => {
+        const controller = new TvlController(
+          mockObject<ReportStatusRepository>(),
+          mockObject<AggregatedReportRepository>(),
+          mockObject<ReportRepository>(),
+          [],
+          [],
+          Logger.SILENT,
+        )
+        const chart = await controller.getProjectAssetChart(
+          OPTIMISM.projectId,
+          AssetId.DAI,
+        )
+        expect(chart).toEqual(undefined)
       })
-    })
-  })
 
-  describe(TvlController.prototype.getProjectAssetChart.name, () => {
-    it('returns undefined if project does not exist', async () => {
-      const controller = new TvlController(
-        mockObject<ReportStatusRepository>(),
-        mockObject<AggregatedReportRepository>(),
-        mockObject<ReportRepository>(),
-        [],
-        [],
-        Logger.SILENT,
-      )
-      const chart = await controller.getProjectAssetChart(
-        OPTIMISM.projectId,
-        AssetId.DAI,
-      )
-      expect(chart).toEqual(undefined)
-    })
+      it('returns undefined if asset does not exist', async () => {
+        const controller = new TvlController(
+          mockObject<ReportStatusRepository>(),
+          mockObject<AggregatedReportRepository>(),
+          mockObject<ReportRepository>(),
+          [OPTIMISM],
+          [],
+          Logger.SILENT,
+        )
+        const chart = await controller.getProjectAssetChart(
+          OPTIMISM.projectId,
+          AssetId.DAI,
+        )
+        expect(chart).toEqual(undefined)
+      })
 
-    it('returns undefined if asset does not exist', async () => {
-      const controller = new TvlController(
-        mockObject<ReportStatusRepository>(),
-        mockObject<AggregatedReportRepository>(),
-        mockObject<ReportRepository>(),
-        [OPTIMISM],
-        [],
-        Logger.SILENT,
-      )
-      const chart = await controller.getProjectAssetChart(
-        OPTIMISM.projectId,
-        AssetId.DAI,
-      )
-      expect(chart).toEqual(undefined)
-    })
+      it('returns reports', async () => {
+        const baseReport: Omit<ReportRecord, 'timestamp'> = {
+          usdValue: 1234_56n,
+          ethValue: 1_111111n,
+          amount: 111_1111n * 10n ** (18n - 4n),
+          asset: AssetId.DAI,
+          chainId: ChainId.ETHEREUM,
+          projectId: OPTIMISM.projectId,
+          reportType: 'CBV',
+        }
 
-    it('returns reports', async () => {
-      const baseReport: Omit<ReportRecord, 'timestamp'> = {
-        usdValue: 1234_56n,
-        ethValue: 1_111111n,
-        amount: 111_1111n * 10n ** (18n - 4n),
-        asset: AssetId.DAI,
-        chainId: ChainId.ETHEREUM,
-        projectId: OPTIMISM.projectId,
-        reportType: 'CBV',
-      }
+        const controller = new TvlController(
+          mockObject<ReportStatusRepository>({
+            async findLatestTimestamp() {
+              return START
+            },
+          }),
+          mockObject<AggregatedReportRepository>(),
+          mockObject<ReportRepository>({
+            getHourlyByProjectAndAsset: async () => [
+              { ...baseReport, timestamp: START.add(-1, 'hours') },
+              { ...baseReport, timestamp: START },
+            ],
+            getSixHourlyByProjectAndAsset: async () => [
+              { ...baseReport, timestamp: START.add(-6, 'hours') },
+              { ...baseReport, timestamp: START },
+            ],
+            getDailyByProjectAndAsset: async () => [
+              { ...baseReport, timestamp: START.add(-1, 'days') },
+              { ...baseReport, timestamp: START },
+            ],
+          }),
+          [OPTIMISM],
+          [DAI],
+          Logger.SILENT,
+        )
+        const charts = await controller.getProjectAssetChart(
+          OPTIMISM.projectId,
+          AssetId.DAI,
+        )
 
-      const controller = new TvlController(
-        mockObject<ReportStatusRepository>({
-          async findLatestTimestamp() {
-            return START
-          },
-        }),
-        mockObject<AggregatedReportRepository>(),
-        mockObject<ReportRepository>({
+        assert(charts)
+
+        // Ignore filled reports
+        const nonZeroHourly = charts.hourly.data.filter(
+          ([, usdValue]) => usdValue > 0,
+        )
+        const nonZeroSixHourly = charts.sixHourly.data.filter(
+          ([, usdValue]) => usdValue > 0,
+        )
+        const nonZeroDaily = charts.daily.data.filter(
+          ([, usdValue]) => usdValue > 0,
+        )
+
+        expect(nonZeroHourly).toEqual([
+          [START.add(-1, 'hours'), 111.1111, 1234.56],
+          [START, 111.1111, 1234.56],
+        ])
+
+        expect(nonZeroSixHourly).toEqual([
+          [START.add(-6, 'hours'), 111.1111, 1234.56],
+          [START, 111.1111, 1234.56],
+        ])
+
+        expect(nonZeroDaily).toEqual([
+          [START.add(-1, 'days'), 111.1111, 1234.56],
+          [START, 111.1111, 1234.56],
+        ])
+      })
+
+      it('adds the Arbitrum USDC value to the TVL', async () => {
+        const baseReport: Omit<ReportRecord, 'timestamp'> = {
+          usdValue: 1234_56n,
+          ethValue: 1_111111n,
+          amount: 111_1111n * 10n ** (6n - 4n),
+          asset: AssetId.USDC,
+          chainId: ChainId.ETHEREUM,
+          projectId: ARBITRUM.projectId,
+          reportType: 'CBV',
+        }
+
+        // The USDC Reports for Arbitrum will be duplicated (EBV + CBV)
+        const reportRepository = mockObject<ReportRepository>({
           getHourlyByProjectAndAsset: async () => [
             { ...baseReport, timestamp: START.add(-1, 'hours') },
+            { ...baseReport, timestamp: START.add(-1, 'hours') },
+            { ...baseReport, timestamp: START },
             { ...baseReport, timestamp: START },
           ],
           getSixHourlyByProjectAndAsset: async () => [
             { ...baseReport, timestamp: START.add(-6, 'hours') },
+            { ...baseReport, timestamp: START.add(-6, 'hours') },
+            { ...baseReport, timestamp: START },
             { ...baseReport, timestamp: START },
           ],
           getDailyByProjectAndAsset: async () => [
             { ...baseReport, timestamp: START.add(-1, 'days') },
+            { ...baseReport, timestamp: START.add(-1, 'days') },
+            { ...baseReport, timestamp: START },
             { ...baseReport, timestamp: START },
           ],
-        }),
-        [OPTIMISM],
-        [DAI],
-        Logger.SILENT,
-      )
-      const types: TvlApiChart['types'] = ['timestamp', 'dai', 'usd']
-      const charts = await controller.getProjectAssetChart(
-        OPTIMISM.projectId,
-        AssetId.DAI,
-      )
-      expect(charts).toEqual({
-        hourly: {
-          types,
-          data: [
-            [START.add(-1, 'hours'), 111.1111, 1234.56],
-            [START, 111.1111, 1234.56],
-          ],
-        },
-        sixHourly: {
-          types,
-          data: [
-            [START.add(-6, 'hours'), 111.1111, 1234.56],
-            [START, 111.1111, 1234.56],
-          ],
-        },
-        daily: {
-          types,
-          data: [
-            [START.add(-1, 'days'), 111.1111, 1234.56],
-            [START, 111.1111, 1234.56],
-          ],
-        },
-      })
-    })
-
-    it('adds the Arbitrum USDC value to the TVL', async () => {
-      const baseReport: Omit<ReportRecord, 'timestamp'> = {
-        usdValue: 1234_56n,
-        ethValue: 1_111111n,
-        amount: 111_1111n * 10n ** (6n - 4n),
-        asset: AssetId.USDC,
-        chainId: ChainId.ETHEREUM,
-        projectId: ARBITRUM.projectId,
-        reportType: 'CBV',
-      }
-
-      // The USDC Reports for Arbitrum will be duplicated (EBV + CBV)
-      const reportRepository = mockObject<ReportRepository>({
-        getHourlyByProjectAndAsset: async () => [
-          { ...baseReport, timestamp: START.add(-1, 'hours') },
-          { ...baseReport, timestamp: START.add(-1, 'hours') },
-          { ...baseReport, timestamp: START },
-          { ...baseReport, timestamp: START },
-        ],
-        getSixHourlyByProjectAndAsset: async () => [
-          { ...baseReport, timestamp: START.add(-6, 'hours') },
-          { ...baseReport, timestamp: START.add(-6, 'hours') },
-          { ...baseReport, timestamp: START },
-          { ...baseReport, timestamp: START },
-        ],
-        getDailyByProjectAndAsset: async () => [
-          { ...baseReport, timestamp: START.add(-1, 'days') },
-          { ...baseReport, timestamp: START.add(-1, 'days') },
-          { ...baseReport, timestamp: START },
-          { ...baseReport, timestamp: START },
-        ],
-      })
-      const controller = new TvlController(
-        mockObject<ReportStatusRepository>({
-          async findLatestTimestamp() {
-            return START
-          },
-        }),
-        mockObject<AggregatedReportRepository>(),
-        reportRepository,
-        [ARBITRUM],
-        [USDC],
-        Logger.SILENT,
-      )
-      const types: TvlApiChart['types'] = ['timestamp', 'usdc', 'usd']
-      const charts = await controller.getProjectAssetChart(
-        ARBITRUM.projectId,
-        AssetId.USDC,
-      )
-      expect(charts).toEqual({
-        hourly: {
-          types,
-          data: [
-            [START.add(-1, 'hours'), 111.1111 * 2, 1234.56 * 2],
-            [START, 111.1111 * 2, 1234.56 * 2],
-          ],
-        },
-        sixHourly: {
-          types,
-          data: [
-            [START.add(-6, 'hours'), 111.1111 * 2, 1234.56 * 2],
-            [START, 111.1111 * 2, 1234.56 * 2],
-          ],
-        },
-        daily: {
-          types,
-          data: [
-            [START.add(-1, 'days'), 111.1111 * 2, 1234.56 * 2],
-            [START, 111.1111 * 2, 1234.56 * 2],
-          ],
-        },
-      })
-    })
-
-    it('correctly finds timestamp for Arbitrum USDC', async () => {
-      const reportRepository = mockObject<ReportRepository>({
-        getHourlyByProjectAndAsset: async () => [],
-        getSixHourlyByProjectAndAsset: async () => [],
-        getDailyByProjectAndAsset: async () => [],
-      })
-      const controller = new TvlController(
-        mockObject<ReportStatusRepository>({
-          async findLatestTimestamp(chainId) {
-            if (chainId === ChainId.ETHEREUM) {
+        })
+        const controller = new TvlController(
+          mockObject<ReportStatusRepository>({
+            async findLatestTimestamp() {
               return START
-            }
-            return START.add(2, 'hours')
-          },
-        }),
-        mockObject<AggregatedReportRepository>(),
-        reportRepository,
-        [ARBITRUM],
-        [USDC],
-        Logger.SILENT,
-      )
+            },
+          }),
+          mockObject<AggregatedReportRepository>(),
+          reportRepository,
+          [ARBITRUM],
+          [USDC],
+          Logger.SILENT,
+        )
+        const charts = await controller.getProjectAssetChart(
+          ARBITRUM.projectId,
+          AssetId.USDC,
+        )
 
-      await controller.getProjectAssetChart(ARBITRUM.projectId, AssetId.USDC)
+        assert(charts)
 
-      expect(
-        reportRepository.getHourlyByProjectAndAsset,
-      ).toHaveBeenOnlyCalledWith(
-        ARBITRUM.projectId,
-        AssetId.USDC,
-        START.add(-7, 'days'),
-      )
+        // Ignore filled reports
+        const nonZeroHourly = charts.hourly.data.filter(
+          ([, usdValue]) => usdValue > 0,
+        )
+        const nonZeroSixHourly = charts.sixHourly.data.filter(
+          ([, usdValue]) => usdValue > 0,
+        )
+        const nonZeroDaily = charts.daily.data.filter(
+          ([, usdValue]) => usdValue > 0,
+        )
 
-      expect(
-        reportRepository.getSixHourlyByProjectAndAsset,
-      ).toHaveBeenOnlyCalledWith(
-        ARBITRUM.projectId,
-        AssetId.USDC,
-        START.add(-90, 'days'),
-      )
+        expect(nonZeroHourly).toEqual([
+          [START.add(-1, 'hours'), 111.1111 * 2, 1234.56 * 2],
+          [START, 111.1111 * 2, 1234.56 * 2],
+        ])
 
-      expect(
-        reportRepository.getDailyByProjectAndAsset,
-      ).toHaveBeenOnlyCalledWith(ARBITRUM.projectId, AssetId.USDC)
+        expect(nonZeroSixHourly).toEqual([
+          [START.add(-6, 'hours'), 111.1111 * 2, 1234.56 * 2],
+          [START, 111.1111 * 2, 1234.56 * 2],
+        ])
+
+        expect(nonZeroDaily).toEqual([
+          [START.add(-1, 'days'), 111.1111 * 2, 1234.56 * 2],
+          [START, 111.1111 * 2, 1234.56 * 2],
+        ])
+      })
+
+      it('correctly finds timestamp for Arbitrum USDC', async () => {
+        const reportRepository = mockObject<ReportRepository>({
+          getHourlyByProjectAndAsset: async () => [],
+          getSixHourlyByProjectAndAsset: async () => [],
+          getDailyByProjectAndAsset: async () => [],
+        })
+        const controller = new TvlController(
+          mockObject<ReportStatusRepository>({
+            async findLatestTimestamp(chainId) {
+              if (chainId === ChainId.ETHEREUM) {
+                return START
+              }
+              return START.add(2, 'hours')
+            },
+          }),
+          mockObject<AggregatedReportRepository>(),
+          reportRepository,
+          [ARBITRUM],
+          [USDC],
+          Logger.SILENT,
+        )
+
+        await controller.getProjectAssetChart(ARBITRUM.projectId, AssetId.USDC)
+
+        expect(
+          reportRepository.getHourlyByProjectAndAsset,
+        ).toHaveBeenOnlyCalledWith(
+          ARBITRUM.projectId,
+          AssetId.USDC,
+          START.add(-7, 'days'),
+        )
+
+        expect(
+          reportRepository.getSixHourlyByProjectAndAsset,
+        ).toHaveBeenOnlyCalledWith(
+          ARBITRUM.projectId,
+          AssetId.USDC,
+          START.add(-90, 'days'),
+        )
+
+        expect(
+          reportRepository.getDailyByProjectAndAsset,
+        ).toHaveBeenOnlyCalledWith(ARBITRUM.projectId, AssetId.USDC)
+      })
     })
   })
 })
